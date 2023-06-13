@@ -79,7 +79,7 @@ struct radix_t {
     struct radix_t *mask;
     struct lock lock;
     int bit, is_mask, walk;
-    uint8_t *buf, *ones, *zeros;
+    uint8_t *buf;
 };
 
 typedef int radix_walk_func(void*, void*);

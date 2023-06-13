@@ -18,7 +18,7 @@ MALLOC_DEFINE(RADIX_MEMORY, "RADIX_MEMORY", "RADIX_MEMORY");
 
 int
 radix_init(struct radix_t *rdx_addr, struct radix_t *rdx_mask, int bit) {
-    int i, ret = 0;
+    int ret = 0;
 
     TRY(rdx_addr != NULL, return EINVAL);
     TRY(bit > 0, return EINVAL);
@@ -28,19 +28,6 @@ radix_init(struct radix_t *rdx_addr, struct radix_t *rdx_mask, int bit) {
     bzero(rdx_addr, sizeof(*rdx_addr));
     TRY(!(ret = MALLOC(rdx_addr->root, sizeof(*rdx_addr->root))), goto err);
     TRY(!(ret = MALLOC(rdx_addr->buf, bit+1)), goto err_buf);
-    TRY(!(ret = MALLOC(rdx_addr->root->left, sizeof(*rdx_addr->root->left))), goto err_left);
-    TRY(!(ret = MALLOC(rdx_addr->root->right, sizeof(*rdx_addr->root->right))), goto err_right);
-    TRY(!(ret = MALLOC(rdx_addr->zeros, sizeof(*rdx_addr->zeros) * (BIT_INDEX(bit) + 1))), goto err_zeros);
-    TRY(!(ret = MALLOC(rdx_addr->ones, sizeof(*rdx_addr->ones) * (BIT_INDEX(bit) + 1))), goto err_ones);
-
-    for (i = 0; i < bit; i++)
-        BIT_SET(rdx_addr->ones, i);
-    rdx_addr->root->left->addr = rdx_addr->zeros;
-    rdx_addr->root->right->addr = rdx_addr->ones;
-    rdx_addr->root->left->parent = rdx_addr->root;
-    rdx_addr->root->right->parent = rdx_addr->root;
-    rdx_addr->root->left->is_leaf = 1;
-    rdx_addr->root->right->is_leaf = 1;
 
     lockinit(&rdx_addr->lock, "radix lock", 0, LK_CANRECURSE);
     rdx_addr->bit = bit;
@@ -48,14 +35,6 @@ radix_init(struct radix_t *rdx_addr, struct radix_t *rdx_mask, int bit) {
     rdx_addr->is_mask = (rdx_mask == NULL);
     return ret;
 
-err_ones:
-    FREE(rdx_addr->zeros);
-err_zeros:
-    FREE(rdx_addr->root->right);
-err_right:
-    FREE(rdx_addr->root->left);
-err_left:
-    FREE(rdx_addr->buf);
 err_buf:
     FREE(rdx_addr->root);
 err:
@@ -93,8 +72,6 @@ radix_free(struct radix_t *rdx) {
         _radix_mask_free(rdx->root);
 
     FREE(rdx->buf);
-    FREE(rdx->ones);
-    FREE(rdx->zeros);
     _radix_free(rdx->root);
     bzero(rdx, sizeof(*rdx));
 }
@@ -129,17 +106,12 @@ _radix_addr_compare(void *a, void *b, int bit) {
 static inline int
 _radix_insert(struct radix_t *rdx, struct radix_node **_n, void *addr) {
     struct radix_node *nn, *n, *n0;
-    int bit = 0, ret = 0, r;
-
-    if (BIT(addr, bit))
-        n = rdx->root->right;
-    else
-        n = rdx->root->left;
+    int bit, ret = 0, r;
 
     TRY(!(ret = MALLOC(nn, sizeof(*nn))), goto err_nn);
     nn->addr = addr;
     nn->is_leaf = 1;
-    for (bit++; bit < rdx->bit; bit++) {
+    for (bit = 0, n = rdx->root; bit < rdx->bit; bit++) {
         if (!n->is_leaf) {
             if (BIT(addr, bit)) {
                 if (n->right == NULL) {
@@ -352,14 +324,9 @@ err:
 static inline struct radix_node*
 _radix_search(struct radix_t *rdx, void *addr) {
     struct radix_node *n;
-    int bit = 0;
+    int bit;
     
-    if (BIT(addr, bit))
-        n = rdx->root->right;
-    else
-        n = rdx->root->left;
-
-    for (bit++; bit < rdx->bit; bit++) {
+    for (bit = 0, n = rdx->root; bit < rdx->bit; bit++) {
         if (n->is_leaf) {
             if (!_radix_addr_compare(addr, n->addr, rdx->bit))
                 return n;
@@ -427,6 +394,7 @@ int
 radix_delete(struct radix_t *rdx, void *addr) {
     struct radix_node *n;
     struct radix_mask_node *m, *m0;
+    int ret = 0;
 
     TRY(addr != NULL, return EINVAL);
     TRY(_radix_traverse_ok(rdx, 0), return EINVAL);
@@ -436,9 +404,10 @@ radix_delete(struct radix_t *rdx, void *addr) {
     lockmgr(&rdx->lock, LK_EXCLUSIVE);
 
     n = _radix_search(rdx, addr);
-    if (n == NULL || !_radix_addr_compare(n->addr, rdx->ones, rdx->bit) ||
-        !_radix_addr_compare(n->addr, rdx->zeros, rdx->bit))
+    if (n == NULL) {
+        ret = EAGAIN;
         goto end;
+    }
 
     DDUMP(n->addr, rdx->bit);
 
@@ -456,7 +425,7 @@ radix_delete(struct radix_t *rdx, void *addr) {
 
 end:
     lockmgr(&rdx->lock, LK_RELEASE);
-    return 0;
+    return ret;
 }
 
 static inline void
