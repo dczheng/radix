@@ -14,7 +14,7 @@ MALLOC_DEFINE(RADIX_MEMORY, "RADIX_MEMORY", "RADIX_MEMORY");
 #define ASSERT(exp) ASSERTF(exp, "%s", "RADIX");
 
 int
-radix_init(struct radix_t *rdx_addr, struct radix_t *rdx_mask, int bit) {
+radix_init0(struct radix_t *rdx_addr, struct radix_t *rdx_mask, int bit) {
     int ret = 0;
 
     TRY(rdx_addr != NULL, return EINVAL);
@@ -39,50 +39,47 @@ err:
 
 static inline void
 _radix_free(struct radix_node *n) {
+    struct radix_mask_node *m0, *m1;
+
     if (n == NULL) return;
+
+    for (m0 = n->mask; m0 != NULL; m0 = m1) {
+        m1 = m0->next;
+        FREE(m0);
+    }
+
     _radix_free(n->left);
     _radix_free(n->right);
     FREE(n);
 }
 
-static inline void
-_radix_mask_free(struct radix_node *n) {
-    struct radix_mask_node *m0, *m1;
-
-    if (n == NULL) return;
-    _radix_mask_free(n->left);
-    _radix_mask_free(n->right);
-    for (m0 = n->mask; m0 != NULL; m0 = m1) {
-        m1 = m0->next;
-        FREE(m0);
-    }
-}
-
 void
-radix_free(struct radix_t *rdx) {
+radix_free0(struct radix_t *rdx) {
     if (rdx == NULL) return;
-
-    lockuninit(&rdx->lock);
-    if (!rdx->is_mask)
-        _radix_mask_free(rdx->root);
-
+    lockmgr(&rdx->lock, LK_EXCLUSIVE);
     FREE(rdx->buf);
     _radix_free(rdx->root);
+    lockmgr(&rdx->lock, LK_RELEASE);
+    lockuninit(&rdx->lock);
     bzero(rdx, sizeof(*rdx));
 }
 
 int
-radix_init_simple(struct radix_t *rdx_addr, struct radix_t *rdx_mask, int bit) {
+radix_init(struct radix_t *rdx, int bit) {
     int ret;
-    TRY(!(ret = radix_init(rdx_mask, NULL, bit)), return ret);
-    TRY(!(ret = radix_init(rdx_addr, rdx_mask, bit)), return ret);
+    TRY(!(ret = radix_init0(rdx, NULL, bit)), return ret);
+    rdx->is_mask = 0;
+    TRY(!(ret = MALLOC(rdx->mask, sizeof(*rdx->mask))),
+        radix_free0(rdx); return ret);
+    TRY(!(ret = radix_init0(rdx->mask, NULL, bit)), return ret);
     return ret;
 }
 
 void
-radix_free_simple(struct radix_t *rdx_addr, struct radix_t *rdx_mask) {
-    radix_free(rdx_addr);
-    radix_free(rdx_mask);
+radix_free(struct radix_t *rdx) {
+    radix_free0(rdx->mask);
+    FREE(rdx->mask);
+    radix_free0(rdx);
 }
 
 static inline int

@@ -10,9 +10,7 @@
 
 #include "radix.h"
 
-struct {
-    struct radix_t addr, mask;
-} rdx;
+struct radix_t rdx;
 
 #define N 30
 #define NBIT 32
@@ -43,8 +41,7 @@ test_radix_load(void) {
     DPRINTF("bit %d is set: %d\n", b1, BIT(&v, b1));
     DPRINTF("bit %d is set: %d\n", b2, BIT(&v, b2));
 
-    TRY(!(ret = radix_init_simple(&rdx.addr, &rdx.mask, NBIT)), goto err);
-
+    TRY(!(ret = radix_init(&rdx, NBIT)), goto err);
 
     a = &addr[0];
     m = &mask[0];
@@ -55,10 +52,10 @@ test_radix_load(void) {
     } else { \
         *a = htonl(((long)a1 << 24) + ((long)a2 << 16) + ((long)a3 << 8) + (long)a4); \
         *m = htonl(((long)m1 << 24) + ((long)m2 << 16) + ((long)m3 << 8) + (long)m4); \
-        TRY(!(ret = radix_insert(&rdx.addr, a, m)), goto err); \
+        TRY(!(ret = radix_insert(&rdx, a, m)), goto err); \
         a++; \
         m++; \
-        radix_print(&rdx.addr); \
+        radix_print(&rdx); \
     } \
 } while(0)
 
@@ -73,18 +70,18 @@ test_radix_load(void) {
 
     DDUMP(&addr[0], NBIT);
     DDUMP(&mask[0], NBIT);
-    TRY(!(ret = radix_search(&rdx.addr, (void**)&aa, &addr[0], &mask[0])), goto err);
+    TRY(!(ret = radix_search(&rdx, (void**)&aa, &addr[0], &mask[0])), goto err);
     DDUMP(aa, NBIT);
 
     DDUMP(&addr[1], NBIT);
-    TRY(!(ret = radix_delete(&rdx.addr, &addr[1])), goto err);
-    radix_print(&rdx.addr);
+    TRY(!(ret = radix_delete(&rdx, &addr[1])), goto err);
+    radix_print(&rdx);
 
     _INSERT(192, 168,   2,   1, 255,   0,   0,   0);
     _INSERT(192, 168,   2,   1, 255, 255,   0,   0);
     _INSERT(192, 168,   2,   1, 255, 255, 244,   0);
 
-    TRY(!(ret = radix_walk(&rdx.addr, test_radix_walk, 1)), goto err);
+    TRY(!(ret = radix_walk(&rdx, test_radix_walk, 1)), goto err);
 
 err:
     return ret;
@@ -93,7 +90,7 @@ err:
 static void
 test_radix_unload(void) {
     DPRINTF("*.*\n");
-    radix_free_simple(&rdx.addr, &rdx.mask);
+    radix_free(&rdx);
 }
 
 static int

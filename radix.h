@@ -84,10 +84,10 @@ struct radix_t {
 
 typedef int radix_walk_func(void*, void*);
 
-int radix_init(struct radix_t*, struct radix_t*, int);
-int radix_init_simple(struct radix_t*, struct radix_t*, int);
+int radix_init0(struct radix_t*, struct radix_t*, int);
+int radix_init(struct radix_t*, int);
+void radix_free0(struct radix_t*);
 void radix_free(struct radix_t*);
-void radix_free_simple(struct radix_t*, struct radix_t*);
 int radix_insert(struct radix_t*, void*, void*);
 void radix_print(struct radix_t*);
 int radix_search(struct radix_t*, void**, void*, void*);
