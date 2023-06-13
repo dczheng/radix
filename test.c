@@ -24,7 +24,8 @@ test_radix_walk(void *addr, void *mask) {
 
 static int
 test_radix_load(void) {
-    uint32_t v, addr[N], mask[N], *a, *m, *aa;
+    uint32_t v, addr[N], mask[N], *a, *m,
+        a_search, m_search, *r_search, a_delete;
     int ret = 0, b1, b2;
 
     DPRINTF("*.*\n");
@@ -46,12 +47,15 @@ test_radix_load(void) {
     a = &addr[0];
     m = &mask[0];
 
+#define ADDR_SET(a, a1, a2, a3, a4) \
+        a = htonl(((long)a1 << 24) + ((long)a2 << 16) + ((long)a3 << 8) + (long)a4);
+
 #define _INSERT(a1, a2, a3, a4, m1, m2, m3, m4) do { \
     if (a - addr >= N) { \
         DPRINTF("Too many address\n"); \
     } else { \
-        *a = htonl(((long)a1 << 24) + ((long)a2 << 16) + ((long)a3 << 8) + (long)a4); \
-        *m = htonl(((long)m1 << 24) + ((long)m2 << 16) + ((long)m3 << 8) + (long)m4); \
+        ADDR_SET(*a, a1, a2, a3, a4); \
+        ADDR_SET(*m, m1, m2, m3, m4); \
         TRY(!(ret = radix_insert(&rdx, a, m)), goto err); \
         a++; \
         m++; \
@@ -68,13 +72,15 @@ test_radix_load(void) {
     _INSERT(192, 168,   1,   1, 253,   0,   0,   0);
     _INSERT(192, 168,   1,   1, 254,   0,   0,   0);
 
-    DDUMP(&addr[0], NBIT);
-    DDUMP(&mask[0], NBIT);
-    TRY(!(ret = radix_search(&rdx, (void**)&aa, &addr[0], &mask[0])), goto err);
-    DDUMP(aa, NBIT);
+    ADDR_SET(a_search, 192, 168,   1,   0);
+    ADDR_SET(m_search, 255, 255, 255,   0);
+    DDUMP(&a_search, NBIT);
+    DDUMP(&m_search, NBIT);
+    TRY(!(ret = radix_search(&rdx, (void**)&r_search, &a_search, &m_search)), goto err);
+    DDUMP(r_search, NBIT);
 
-    DDUMP(&addr[1], NBIT);
-    TRY(!(ret = radix_delete(&rdx, &addr[1])), goto err);
+    ADDR_SET(a_delete, 192, 168,   1,   1);
+    TRY(!(ret = radix_delete(&rdx, &a_delete)), goto err);
     radix_print(&rdx);
 
     _INSERT(192, 168,   2,   1, 255,   0,   0,   0);
