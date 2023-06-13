@@ -13,9 +13,6 @@ MALLOC_DEFINE(RADIX_MEMORY, "RADIX_MEMORY", "RADIX_MEMORY");
 #define ASSERTF(exp, fmt, ...) TRY(exp, panic(fmt, ##__VA_ARGS__))
 #define ASSERT(exp) ASSERTF(exp, "%s", "RADIX");
 
-#define LEFT_IS_LEAF(n) ((n)->left != NULL && (n)->left->is_leaf)
-#define RIGHT_IS_LEAF(n) ((n)->right != NULL && (n)->right->is_leaf)
-
 int
 radix_init(struct radix_t *rdx_addr, struct radix_t *rdx_mask, int bit) {
     int ret = 0;
