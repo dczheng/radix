@@ -27,7 +27,7 @@ radix_init(struct radix_t *rdx_addr, struct radix_t *rdx_mask, int bit) {
 
     bzero(rdx_addr, sizeof(*rdx_addr));
     TRY(!(ret = MALLOC(rdx_addr->root, sizeof(*rdx_addr->root))), goto err);
-    TRY(!(ret = MALLOC(rdx_addr->buf, bit+1)), goto err_buf);
+    TRY(!(ret = MALLOC(rdx_addr->buf, bit+1)), FREE(rdx_addr->root); goto err);
 
     lockinit(&rdx_addr->lock, "radix lock", 0, LK_CANRECURSE);
     rdx_addr->bit = bit;
@@ -35,8 +35,6 @@ radix_init(struct radix_t *rdx_addr, struct radix_t *rdx_mask, int bit) {
     rdx_addr->is_mask = (rdx_mask == NULL);
     return ret;
 
-err_buf:
-    FREE(rdx_addr->root);
 err:
     bzero(rdx_addr, sizeof(*rdx_addr));
     return ret;
@@ -108,7 +106,7 @@ _radix_insert(struct radix_t *rdx, struct radix_node **_n, void *addr) {
     struct radix_node *nn, *n, *n0;
     int bit, ret = 0, r;
 
-    TRY(!(ret = MALLOC(nn, sizeof(*nn))), goto err_nn);
+    TRY(!(ret = MALLOC(nn, sizeof(*nn))), goto err);
     nn->addr = addr;
     nn->is_leaf = 1;
     for (bit = 0, n = rdx->root; bit < rdx->bit; bit++) {
@@ -139,7 +137,7 @@ _radix_insert(struct radix_t *rdx, struct radix_node **_n, void *addr) {
             goto exist;
         }
 
-        TRY(!(ret = MALLOC(n0, sizeof(*n0))),  goto err_n0);
+        TRY(!(ret = MALLOC(n0, sizeof(*n0))),  FREE(nn); goto err);
         n0->parent = n->parent;
         if (n->parent->left == n)
             n->parent->left = n0;
@@ -173,9 +171,7 @@ exist:
     *_n = nn;
     return ret;
 
-err_n0:
-    FREE(nn);
-err_nn:
+err:
     *_n = NULL;
     return ret;
 }
