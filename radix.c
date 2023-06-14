@@ -30,6 +30,7 @@ radix_init0(struct radix_t *rdx_addr, struct radix_t *rdx_mask, int bit) {
     rdx_addr->bit = bit;
     rdx_addr->mask = rdx_mask;
     rdx_addr->is_mask = (rdx_mask == NULL);
+
     return ret;
 
 err:
@@ -83,11 +84,11 @@ radix_free(struct radix_t *rdx) {
 }
 
 static inline int
-_radix_addr_compare(void *a, void *b, int bit) {
-    for (int i = 0; i < bit; i++) {
-        if (BIT(a, i) == BIT(b, i))
+_radix_addr_compare(int *b, void *a1, void *a2, int bit) {
+    for (*b = 0; *b < bit; (*b)++) {
+        if (BIT(a1, *b) == BIT(a2, *b))
             continue;
-        if (BIT(a, i))
+        if (BIT(a1, *b))
             return 1;
         else
             return -1;
@@ -95,78 +96,78 @@ _radix_addr_compare(void *a, void *b, int bit) {
     return 0;
 }
 
-static inline int
-_radix_insert(struct radix_t *rdx, struct radix_node **_n, void *addr) {
-    struct radix_node *nn, *n, *n0;
-    int bit, ret = 0, r;
-
-    TRY(!(ret = MALLOC(nn, sizeof(*nn))), goto err);
-    nn->addr = addr;
-    nn->is_leaf = 1;
-    for (bit = 0, n = rdx->root; bit < rdx->bit; bit++) {
-        if (!n->is_leaf) {
-            if (BIT(addr, bit)) {
-                if (n->right == NULL) {
-                    n->right = nn;
-                    nn->parent = n;
-                    break;
-                }
-                n = n->right;
-            } else {
-                if (n->left == NULL) {
-                    n->left = nn;
-                    nn->parent = n;
-                    break;
-                }
-                n = n->left;
-            }
-            continue;
-        }
-
-        ASSERT(n->addr != NULL);
-        r = _radix_addr_compare(addr, n->addr, rdx->bit);
-        if (!r) {
-            FREE(nn);
-            nn = n;
-            goto exist;
-        }
-
-        TRY(!(ret = MALLOC(n0, sizeof(*n0))),  FREE(nn); goto err);
-        n0->parent = n->parent;
-        if (n->parent->left == n)
-            n->parent->left = n0;
+static inline struct radix_node*
+_radix_search0(struct radix_t *rdx, struct radix_node **p, void *addr) {
+    struct radix_node *n;
+    for (n = rdx->root; n != NULL && !n->is_leaf;) {
+        *p = n;
+        if (BIT(addr, n->bit))
+            n = n->right;
         else
-            n->parent->right = n0;
+            n = n->left;
+    }
+    return n;
+}
 
-        n->parent = n0;
-        if (BIT(n->addr, bit)) {
-            n0->right  = n;
-            if (!BIT(addr, bit)) {
-                n0->left = nn;
-                nn->parent = n0;
-                break;
-            }
-        } else {
-            n0->left = n;
-            if (BIT(addr, bit)) {
-                n0->right = nn;
-                nn->parent = n0;
-                break;
-            }
-        }
+static inline int
+_radix_insert(struct radix_t *rdx, struct radix_node **n, void *addr) {
+    struct radix_node *nn, *n0, *p = NULL;
+    int bit, ret = 0;
+
+    TRY(!(ret = MALLOC(n0, sizeof(*n0))), goto err);
+    n0->is_leaf = 1;
+    n0->bit = rdx->bit - 1;
+    n0->addr = addr;
+
+    *n = _radix_search0(rdx, &p, addr);
+    if ((*n) == NULL) {
+        n0->parent = p;
+        if (BIT(addr, p->bit))
+            p->right = n0;
+        else
+            p->left = n0;
+        *n = n0;
+        goto end;
     }
-    if (bit == rdx->bit) {
-        ASSERT(n != NULL && n->is_leaf);
-        ASSERT(!_radix_addr_compare(addr, n->addr, rdx->bit));
-        FREE(nn);
-        nn = n;
+
+    if (!_radix_addr_compare(&bit, addr, (*n)->addr, rdx->bit)) {
+        FREE(n0);
+        goto exist;
     }
+
+    for (nn = rdx->root; nn->bit < bit; ) {
+        if (BIT(addr, nn->bit))
+            nn = nn->right;
+        else
+            nn = nn->left;
+    }
+
+    TRY(!(ret = MALLOC(p, sizeof(*p))), FREE(n0); goto err);
+
+    p->bit = bit;
+    p->parent = nn->parent;
+    if (nn->parent->left == nn)
+        nn->parent->left = p;
+    else
+        nn->parent->right = p;
+
+    n0->parent = nn->parent = p;
+
+    if (BIT(addr, bit))  {
+        p->right = n0;
+        p->left = nn;
+    } else {
+        p->left = n0;
+        p->right = nn;
+    }
+    *n = n0;
+
 exist:
-    *_n = nn;
+end:
     return ret;
-
+    
 err:
-    *_n = NULL;
+    *n = NULL;
     return ret;
 }
 
@@ -310,40 +311,24 @@ err:
     lockmgr(&rdx->lock, LK_RELEASE);
 }
 
-
 static inline struct radix_node*
 _radix_search(struct radix_t *rdx, void *addr) {
-    struct radix_node *n;
-    int bit;
-    
-    for (bit = 0, n = rdx->root; bit < rdx->bit; bit++) {
-        if (n->is_leaf) {
-            if (!_radix_addr_compare(addr, n->addr, rdx->bit))
-                return n;
-        }
-        if (BIT(addr, bit)) {
-            if (n->right == NULL)
-                return NULL;
-            n = n->right;
-        } else {
-            if (n->left == NULL)
-                return NULL;
-            n = n->left;
-        }
-    }
-    if (bit == rdx->bit) {
-        ASSERT(n != NULL && n->is_leaf);
-        ASSERT(!_radix_addr_compare(addr, n->addr, rdx->bit));
-        return n;
-    }
-    return NULL;
+    struct radix_node *p, *n;
+    int b;
+
+    n = _radix_search0(rdx, &p, addr);
+
+    if (n == NULL || _radix_addr_compare(&b, n->addr, addr, rdx->bit))
+        return NULL;
+    return n;
+
 }
 
 int
 radix_search(struct radix_t *rdx, void **raddr, void *addr, void *mask) {
     struct radix_node *n;
     struct radix_mask_node *m;
-    int ret = 0;
+    int ret = 0, b;
     
     *raddr = NULL;
     TRY(addr != NULL, return EINVAL);
@@ -363,7 +348,7 @@ radix_search(struct radix_t *rdx, void **raddr, void *addr, void *mask) {
         for (m = n->mask; m != NULL; m = m->next) {
             ASSERT(m->mask != NULL);
             ASSERT(m->mask->addr != NULL);
-            if (!_radix_addr_compare(mask, m->mask->addr, rdx->bit))
+            if (!_radix_addr_compare(&b, mask, m->mask->addr, rdx->bit))
                 break;
         }
         if (m == NULL) {

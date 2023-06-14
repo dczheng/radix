@@ -71,7 +71,7 @@ struct radix_node {
     struct radix_node *left, *right, *parent;
     struct radix_mask_node *mask;
     void *addr;
-    int is_leaf;
+    int is_leaf, bit;
 };
 
 struct radix_t {
